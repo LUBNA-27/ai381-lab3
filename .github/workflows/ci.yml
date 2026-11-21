@@ -9,6 +9,7 @@ on:
   push:                  # build and publish only when the service itself changes
     branches: [main]
     paths:
+      - "artifacts/**"
       - "src/**"
       - "tests/**"
       - "data/**"
