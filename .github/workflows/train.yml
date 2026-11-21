@@ -60,7 +60,7 @@ jobs:
             echo "To record a promotion, commit \`artifacts/champion.json\`, \`artifacts/metadata.json\` and \`artifacts/model.joblib\` from your own run of \`scripts/promote.py\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
-            - name: Build the champion image (main only, after the gate passed)
+      - name: Build the champion image (main only, after the gate passed)
         if: github.event_name == 'push'
         run: docker build --build-arg GIT_SHA="$GITHUB_SHA" -t "churn-api:${GITHUB_SHA::7}" .
 
