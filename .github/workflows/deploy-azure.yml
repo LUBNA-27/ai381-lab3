@@ -1,0 +1,62 @@
+# Lab 3, Part 6, option A: deploy the champion image to Azure Container Apps from GitHub Actions with OIDC
+# (no stored passwords: Azure trusts GitHub tokens from the main branch of this repo, via a federated credential).
+name: deploy-azure
+
+on:
+  workflow_run:            # after ci has built and published an image on main
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:       # or by hand, choosing which image to deploy
+    inputs:
+      tag:
+        description: "Image tag to deploy (7-character commit SHA)"
+        required: true
+        default: "fc36344"
+
+permissions:
+  id-token: write   # lets the job ask GitHub for an OIDC token
+  contents: read
+
+env:
+  RESOURCE_GROUP: ai381-lab3-rg
+  APP_NAME: ai381-churn-api
+  ENVIRONMENT: ai381-churn-api-env
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Image name from the commit that ci built
+        run: |
+          SHA="${{ inputs.tag || github.event.workflow_run.head_sha }}"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:${SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Log in to Azure with OIDC (no password)
+        uses: Azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure Container Apps
+        uses: Azure/container-apps-deploy-action@8dff69dac3367c32ceb2690d8f13adbeab462703 # v2
+        with:
+          imageToDeploy: ${{ env.IMAGE }}
+          containerAppName: ${{ env.APP_NAME }}
+          resourceGroup: ${{ env.RESOURCE_GROUP }}
+          containerAppEnvironment: ${{ env.ENVIRONMENT }}
+          targetPort: 8000
+          ingress: external
+
+      - name: Scale to zero when idle (and cap the cost)
+        run: az containerapp update -n "$APP_NAME" -g "$RESOURCE_GROUP" --min-replicas 0 --max-replicas 1 -o none
+
+      - name: Smoke test on the public URL
+        run: |
+          FQDN=$(az containerapp show -n "$APP_NAME" -g "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Public URL: https://$FQDN"
+          bash scripts/smoke_test.sh "https://$FQDN"
